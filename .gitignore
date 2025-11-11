@@ -1,0 +1,5 @@
+.pydeps/
+.venv/
+sites/
+__pycache__/
+
