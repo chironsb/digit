@@ -134,14 +134,15 @@ def interactive_mode() -> argparse.Namespace:
             print(f"\n  {red('✖ Error:')} File not found: {urls_file}")
             sys.exit(1)
     else:
-        print()
-        print(f"  {color256(82, '┌─')} {bold('Target URL')}")
-        print(f"  {color256(82, '│')}  Enter the website to scrape:")
-        print(f"  {color256(82, '└─')} {color256(220, '➜')} ", end="", flush=True)
-        url = input().strip()
-        if not url:
-            print(f"\n  {red('✖ Error:')} URL is required")
-            sys.exit(1)
+        url = ""
+        while not url:
+            print()
+            print(f"  {color256(82, '┌─')} {bold('Target URL')}")
+            print(f"  {color256(82, '│')}  Enter the website to scrape:")
+            print(f"  {color256(82, '└─')} {color256(220, '➜')} ", end="", flush=True)
+            url = input().strip()
+            if not url:
+                print(f"\n  {red('✖ Error:')} URL is required. Please try again.")
 
     # Sitemap mode
     print()
@@ -188,11 +189,11 @@ def interactive_mode() -> argparse.Namespace:
     print(color256(34, "═══════════════════════════════════════════════════════════════"))
     print()
     if urls_file:
-        print(f"  {color256(82, 'Mode:')}        {color256(220, 'Batch File')}")
+        print(f"  {color256(82, 'Mode:')}       {color256(220, 'Batch File')}")
         print(f"  {color256(82, 'File:')}       {color256(220, urls_file)}")
     else:
-        print(f"  {color256(82, 'Mode:')}        {color256(220, 'Single URL')}")
-        print(f"  {color256(82, 'URL:')}         {color256(220, url)}")
+        print(f"  {color256(82, 'Mode:')}       {color256(220, 'Single URL')}")
+        print(f"  {color256(82, 'URL:')}        {color256(220, url)}")
     out_display = out_dir.replace(os.path.expanduser("~"), "~")
     print(f"  {color256(82, 'Output:')}     {color256(220, out_display)}")
     print(f"  {color256(82, 'Sitemap:')}    {color256(220, 'Y' if sitemap_only else 'N')}")
@@ -309,6 +310,13 @@ def normalize_url(base: str, href: str) -> str | None:
     normalized = parsed._replace(netloc=parsed.netloc.lower()).geturl()
     return normalized
 
+
+def normalize_seed(seed: str) -> str:
+    """Ensure seed URL ends with / if it has a path"""
+    parsed = urlparse(seed)
+    if parsed.path and not parsed.path.endswith('/'):
+        return seed + '/'
+    return seed
 
 def same_scope(seed: str, candidate: str) -> bool:
     a = urlparse(seed)
@@ -584,6 +592,7 @@ def crawl_with_frontier(
     format: str,
     diff: bool,
 ) -> int:
+    seed = normalize_seed(seed)
     parsed_seed = urlparse(seed)
     base = f"{parsed_seed.scheme}://{parsed_seed.netloc}{parsed_seed.path if parsed_seed.path.endswith('/') else parsed_seed.path + '/'}"
     rp = load_robots(base)
@@ -637,6 +646,17 @@ def crawl_with_frontier(
 
             if depth_limit == 0 or depth < depth_limit:
                 soup = BeautifulSoup(html, "html.parser")
+                # Check for meta refresh redirects
+                meta_refresh = soup.find("meta", attrs={"http-equiv": re.compile(r"refresh", re.I)})
+                if meta_refresh and meta_refresh.get("content"):
+                    content = meta_refresh["content"]
+                    match = re.search(r"url=([^;\"']+)", content, re.I)
+                    if match:
+                        href = match.group(1).strip()
+                        nxt = normalize_url(url, href)
+                        if nxt and same_scope(base, nxt):
+                            queue.append((nxt, depth + 1))
+                # Parse regular <a> tags
                 for a in soup.find_all("a"):
                     nxt = normalize_url(url, a.get("href"))
                     if not nxt:
@@ -657,18 +677,15 @@ def crawl_sitemap_first(
     format: str,
     diff: bool,
 ) -> int:
+    seed = normalize_seed(seed)
     delay = max(0.0, 1.0 / rps)
     count = 0
     all_urls = list(iter_sitemap_urls(seed))
     if not all_urls:
         return 0
-    # Filter URLs to only include those in the same scope (subdirectory) as seed
-    # If seed is just the domain, it will include all URLs
-    # If seed has a specific path, it will only include URLs under that path
     urls = [url for url in all_urls if same_scope(seed, url)]
     if not urls:
         return 0
-    # Print on a fresh line and in green; highlight page count in green
     print(
         f"\n\033[33mSitemap found!\033[0m Filtered to \033[32m{len(urls)}\033[0m pages in scope (from {len(all_urls)} total)...",
         flush=True,
@@ -721,12 +738,9 @@ def main():
         include_rx = re.compile(args.include) if args.include else None
         exclude_rx = re.compile(args.exclude) if args.exclude else None
 
-        # Wrapper handles UI; keep CLI quiet except for essential lines
-
         used_sitemap = False
         written_count = 0
         if args.sitemap_only and not args.include and not args.exclude:
-            # Try sitemap only if --sitemap-only flag is set
             print(f"[{domain}] Trying sitemap.xml ...", flush=True)
             cnt = crawl_sitemap_first(
                 seed,
@@ -741,19 +755,25 @@ def main():
                 used_sitemap = True
                 written_count = cnt
             else:
-                print(
-                    f"\n\033[31m[{domain}] No sitemap or empty sitemap. Exiting due to --sitemap-only.\033[0m",
-                    flush=True,
-                )
-                continue
+                print(f"\n\n\033[31m[{domain}] No sitemap or empty sitemap.\033[0m", flush=True)
+                if sys.stdin.isatty():
+                    try:
+                        print(f"\n\033[33m[{domain}] Continue with manual crawl? (Y/n): \033[0m", end="", flush=True)
+                        response = input().strip().lower()
+                        if response in ("n", "no"):
+                            print(f"\033[31m[{domain}] Skipping due to --sitemap-only.\033[0m", flush=True)
+                            continue
+                        else:
+                            args.sitemap_only = False
+                    except (EOFError, KeyboardInterrupt):
+                        print(f"\033[31m[{domain}] Exiting due to --sitemap-only.\033[0m", flush=True)
+                        continue
+                else:
+                    print(f"\033[31m[{domain}] Exiting due to --sitemap-only.\033[0m", flush=True)
+                    continue
 
         if not used_sitemap:
-            print(
-                f"\n\033[33m[{domain}] Falling back to scoped crawl ...\033[0m",
-                flush=True,
-            )
-            # crawl_with_frontier already limits to same scope (subdirectory) via same_scope() check
-            # So it will scrape the seed URL and all pages in its subdirectory tree
+            print(f"\n\033[33m[{domain}] Falling back to scoped crawl ...\033[0m", flush=True)
             written_count = crawl_with_frontier(
                 seed=seed,
                 out_dir=out_subdir,
@@ -769,7 +789,6 @@ def main():
             )
         total_written += written_count
 
-    # Write summary for wrapper if requested
     import os
 
     summary_path = os.environ.get("WEB2SCRAP_SUMMARY_PATH")
