@@ -39,12 +39,13 @@ set_box_chars() {
   fi
 }
 set_box_chars
+
 hr_line() {
   local line
   printf -v line '%*s' "$WIDTH" ''
   echo "${line// /$LINE_CHAR}"
 }
-# 256-color helpers for rainbow waves
+
 palette=(196 202 208 214 220 226 190 154 118 82 46 47 48 49 51 39 27 21 57 93 129 165 201)
 palette_len=${#palette[@]}
 color256() { # $1 code, $2 text
@@ -92,7 +93,6 @@ box_line() { # $1 text
   printf '%s %-*s %s\n' "$VERT_CHAR" "$inner" "$text" "$VERT_CHAR"
 }
 
-# Graceful abort on Ctrl-C
 abort() {
   echo
   echo "$(red 'Aborted by user (Ctrl-C).')"
@@ -119,7 +119,6 @@ spinner() {
     i=$((i + 1))
     sleep 0.1
   done
-  # clear the line
   printf "\r\033[K"
   tput cnorm || true
 }
@@ -133,7 +132,6 @@ echo "  $(bold '🌐 Configuration Setup')"
 echo "$(color256 34 '═══════════════════════════════════════════════════════════════')"
 echo
 
-# Prompt output directory
 echo
 echo "  $(color256 82 '┌─') $(bold 'Output Directory')"
 echo "  $(color256 82 '│')  Default: $(color256 246 "$DEFAULT_OUT")"
@@ -142,7 +140,6 @@ read -r OUT_DIR_INPUT || true
 OUT_DIR="${OUT_DIR_INPUT:-$DEFAULT_OUT}"
 mkdir -p "$OUT_DIR"
 
-# Single URL or Batch mode?
 echo
 echo "  $(color256 82 '┌─') $(bold '📋 Input Mode')"
 echo "  $(color256 82 '│')  How do you want to provide URLs?"
@@ -154,10 +151,9 @@ read -rp "" choice || true
 case "$choice" in
 1) BATCH_MODE=N ;;
 2) BATCH_MODE=Y ;;
-*) BATCH_MODE=N ;; # default to single URL
+*) BATCH_MODE=N ;;
 esac
 
-# Prompt URL or Batch file based on choice
 if [[ "$BATCH_MODE" == "Y" ]]; then
   echo
   echo "  $(color256 82 '┌─') $(bold '📋 Batch File')"
@@ -174,7 +170,7 @@ if [[ "$BATCH_MODE" == "Y" ]]; then
     echo "  $(red '✖ Error:') File not found: $BATCH_FILE"
     exit 1
   fi
-  URL=""  # Clear URL when using batch mode
+  URL=""
 else
   URL="${1-}"
   while [[ -z "${URL}" ]]; do
@@ -188,10 +184,9 @@ else
       echo "  $(red '✖ Error:') URL is required. Please try again."
     fi
   done
-  BATCH_FILE=""  # Clear batch file when using single URL
+  BATCH_FILE=""
 fi
 
-# Preferi sitemap-only?
 echo
 echo "  $(color256 82 '┌─') $(bold '🗺️  Sitemap Mode')"
 echo "  $(color256 82 '│')  Use sitemap.xml if available?"
@@ -203,10 +198,9 @@ read -rp "" choice || true
 case "$choice" in
 1) USE_SM=Y ;;
 2) USE_SM=N ;;
-*) USE_SM=Y ;; # default
+*) USE_SM=Y ;;
 esac
 
-# Output format
 echo
 echo "  $(color256 82 '┌─') $(bold '📄 Output Format')"
 echo "  $(color256 82 '│')  Choose export format:"
@@ -222,10 +216,9 @@ case "$choice" in
 2) FMT=json ;;
 3) FMT=txt ;;
 4) FMT=html ;;
-*) FMT=md ;; # default
+*) FMT=md ;;
 esac
 
-# Diff mode
 echo
 echo "  $(color256 82 '┌─') $(bold '🔄 Diff Mode')"
 echo "  $(color256 82 '│')  Only update changed pages?"
@@ -237,7 +230,7 @@ read -rp "" choice || true
 case "$choice" in
 1) USE_DIFF=Y ;;
 2) USE_DIFF=N ;;
-*) USE_DIFF=N ;; # default
+*) USE_DIFF=N ;;
 esac
 
 echo
@@ -277,7 +270,6 @@ echo
 echo -n "$(color256 46 '  ▶') $(bold 'Ready to start scraping!') Press $(color256 220 'Enter') to proceed or $(color256 196 'Ctrl+C') to cancel..."
 read -r _
 
-# Ensure local deps
 if [[ ! -d "$PYDEPS_DIR" || -z "$(ls -A "$PYDEPS_DIR" 2>/dev/null)" ]]; then
   echo
   echo "$(color256 220 '  ⚙️  Installing dependencies...')"
@@ -290,7 +282,6 @@ if [[ ! -d "$PYDEPS_DIR" || -z "$(ls -A "$PYDEPS_DIR" 2>/dev/null)" ]]; then
   echo
 fi
 
-# Run scraper
 echo
 echo "$(color256 34 '═══════════════════════════════════════════════════════════════')"
 echo "  $(color256 220 '⚡') $(bold 'Scraping in progress...')"
@@ -303,11 +294,9 @@ else
   EXTRA_ARGS+=("--url" "$URL")
 fi
 
-# Check sitemap if sitemap mode is enabled
 USE_SITEMAP_ONLY=false
 if [[ "${USE_SM^^}" == "Y" ]] || [[ "${USE_SM^^}" == "YES" ]]; then
   if [[ -n "$BATCH_FILE" ]]; then
-    # For batch mode, check first URL
     FIRST_URL=$(head -n 1 "$BATCH_FILE" | tr -d '\r\n' || echo "")
     DOMAIN=$(echo "$FIRST_URL" | sed -E 's|^https?://([^/]+).*|\1|')
   else
@@ -326,13 +315,11 @@ if [[ "${USE_SM^^}" == "Y" ]] || [[ "${USE_SM^^}" == "YES" ]]; then
       echo "  $(red 'Aborted.')"
       exit 0
     fi
-    # Will use manual crawl
   else
     USE_SITEMAP_ONLY=true
   fi
 fi
 
-# Create Python scraper script inline
 SCRAPER_SCRIPT=$(mktemp)
 cat > "$SCRAPER_SCRIPT" << 'PYEOF'
 import sys
@@ -619,7 +606,6 @@ def crawl_with_frontier(seed, out_dir, max_pages, depth_limit, rps, include_rx, 
             print(f"[\033[32m{pages}\033[0m] {rel}", flush=True)
             if depth < depth_limit or depth_limit == 0:
                 soup = BeautifulSoup(html, "html.parser")
-                # Check for meta refresh redirects
                 meta_refresh = soup.find("meta", attrs={"http-equiv": re.compile(r"refresh", re.I)})
                 if meta_refresh and meta_refresh.get("content"):
                     content = meta_refresh["content"]
@@ -629,7 +615,6 @@ def crawl_with_frontier(seed, out_dir, max_pages, depth_limit, rps, include_rx, 
                         next_url = normalize_url(url, href)
                         if next_url and same_scope(seed, next_url) and next_url not in seen:
                             queue.append((next_url, depth + 1))
-                # Parse regular <a> tags
                 for a in soup.find_all("a", href=True):
                     href = a["href"]
                     next_url = normalize_url(url, href)
@@ -691,7 +676,6 @@ if __name__ == "__main__":
                 f.write(f"count: {total_written}\n")
 PYEOF
 
-# Run scraper
 SUMMARY_FILE=$(mktemp)
 export WEB2SCRAP_SUMMARY_PATH="$SUMMARY_FILE"
 export PYDEPS_DIR="$PYDEPS_DIR"
@@ -714,13 +698,11 @@ fi
     "$PYTHON" "$SCRAPER_SCRIPT" "${SCRAPER_ARGS[@]}"
 ) &
 PID=$!
-# Determine process group id of scraper
 PGID=$(ps -o pgid= -p "$PID" 2>/dev/null | tr -d ' ' || echo "")
 spinner $PID "$(green 'Running scraper')"
 wait $PID
 rm -f "$SCRAPER_SCRIPT"
 
-# Summary (boxed)
 COUNT=""
 if [[ -f "$SUMMARY_FILE" ]]; then
   COUNT=$(grep -E '^count:' "$SUMMARY_FILE" | awk '{print $2}' | tr -d ' ')
